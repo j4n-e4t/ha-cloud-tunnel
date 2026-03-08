@@ -2,10 +2,6 @@
 builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
-[deploy]
-healthcheckPath = "/health"
-healthcheckTimeout = 10
-
 [[mounts]]
 source = "data"
 destination = "/data"
