@@ -1,222 +1,74 @@
+// HA Cloud Tunnel Client
+//
+// This client establishes a secure tunnel to a remote server, allowing
+// external access to a local Home Assistant instance.
+//
+// Architecture:
+// - Client: Manages the tunnel session and reconnection logic
+// - Tunnel: Establishes TLS connection with certificate fingerprint verification
+// - Proxy: Forwards incoming streams to Home Assistant
+//
+// The client authenticates using a pre-shared token and verifies the server's
+// certificate fingerprint to prevent MITM attacks.
+
 package main
 
 import (
-	"crypto/sha256"
-	"crypto/tls"
-	"encoding/hex"
-	"fmt"
-	"io"
 	"log"
-	"net"
 	"os"
 	"strings"
-	"sync"
 	"time"
-
-	"github.com/hashicorp/yamux"
 )
 
+// Configuration constants
 const (
-	target         = "homeassistant:8123"
-	reconnectDelay = 5 * time.Second
-	connectTimeout = 30 * time.Second
+	TargetAddr     = "homeassistant:8123" // Local Home Assistant address
+	ReconnectDelay = 5 * time.Second      // Delay between reconnection attempts
+	ConnectTimeout = 30 * time.Second     // Timeout for establishing connection
+	AckTimeout     = 10 * time.Second     // Timeout for authentication response
+	ProxyTimeout   = 10 * time.Second     // Timeout for connecting to Home Assistant
 )
 
-type Client struct {
-	serverAddr    string
-	token         string
-	fingerprint   string
-	session       *yamux.Session
-	sessionMu     sync.RWMutex
-	connections   int64
-	connectionsMu sync.Mutex
-}
-
+// main loads configuration from environment variables and starts the tunnel client.
+// Required environment variables:
+// - SERVER_ADDR: Server address (host:port)
+// - TOKEN: Authentication token (sk-{32-hex-chars})
+// - CLIENT_KEY: Client key for binding (ck-{32-hex-chars})
+// - FINGERPRINT: Server certificate fingerprint (SHA256:xxxx)
 func main() {
 	serverAddr := os.Getenv("SERVER_ADDR")
 	if serverAddr == "" {
-		serverAddr = "localhost:7777"
+		log.Fatal("SERVER_ADDR environment variable is required")
 	}
 
 	token := os.Getenv("TOKEN")
 	if token == "" {
 		log.Fatal("TOKEN environment variable is required")
 	}
-	if len(token) != 32 {
-		log.Fatal("TOKEN must be exactly 32 characters")
+	if len(token) != 35 || token[:3] != "sk-" {
+		log.Fatal("TOKEN must be in format sk-{32-hex-chars}")
+	}
+
+	clientKey := os.Getenv("CLIENT_KEY")
+	if clientKey == "" {
+		log.Fatal("CLIENT_KEY environment variable is required")
+	}
+	if len(clientKey) != 35 || clientKey[:3] != "ck-" {
+		log.Fatal("CLIENT_KEY must be in format ck-{32-hex-chars}")
 	}
 
 	fingerprint := os.Getenv("FINGERPRINT")
 	if fingerprint == "" {
 		log.Fatal("FINGERPRINT environment variable is required")
 	}
-	// Normalize fingerprint
+	// Normalize fingerprint to uppercase with SHA256: prefix
 	fingerprint = strings.ToUpper(strings.TrimPrefix(fingerprint, "SHA256:"))
 	fingerprint = "SHA256:" + fingerprint
 
-	c := &Client{
-		serverAddr:  serverAddr,
-		token:       token,
-		fingerprint: fingerprint,
-	}
+	c := NewClient(serverAddr, token, clientKey, fingerprint)
 
 	log.Printf("Server: %s", serverAddr)
 	log.Printf("Expected fingerprint: %s", fingerprint)
 
-	// Main connection loop
-	c.connectLoop()
-}
-
-func (c *Client) connectLoop() {
-	for {
-		log.Printf("Connecting to server at %s...", c.serverAddr)
-
-		err := c.connect()
-		if err != nil {
-			log.Printf("Connection failed: %v", err)
-			log.Printf("Reconnecting in %v...", reconnectDelay)
-			time.Sleep(reconnectDelay)
-			continue
-		}
-
-		log.Println("Connected to server, handling streams...")
-
-		// Handle incoming streams
-		c.handleStreams()
-
-		log.Printf("Disconnected, reconnecting in %v...", reconnectDelay)
-		time.Sleep(reconnectDelay)
-	}
-}
-
-func (c *Client) connect() error {
-	// TLS config that verifies fingerprint
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: true, // We verify manually via fingerprint
-		VerifyConnection: func(cs tls.ConnectionState) error {
-			if len(cs.PeerCertificates) == 0 {
-				return fmt.Errorf("no server certificate")
-			}
-			cert := cs.PeerCertificates[0]
-			hash := sha256.Sum256(cert.Raw)
-			actualFingerprint := "SHA256:" + strings.ToUpper(hex.EncodeToString(hash[:]))
-
-			if actualFingerprint != c.fingerprint {
-				return fmt.Errorf("fingerprint mismatch: expected %s, got %s", c.fingerprint, actualFingerprint)
-			}
-			log.Println("Server fingerprint verified")
-			return nil
-		},
-	}
-
-	// Connect with TLS
-	dialer := &net.Dialer{Timeout: connectTimeout}
-	conn, err := tls.DialWithDialer(dialer, "tcp", c.serverAddr, tlsConfig)
-	if err != nil {
-		return fmt.Errorf("TLS dial failed: %w", err)
-	}
-
-	// Send token
-	if _, err := conn.Write([]byte(c.token)); err != nil {
-		conn.Close()
-		return fmt.Errorf("failed to send token: %w", err)
-	}
-
-	// Wait for acknowledgment
-	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-	ack := make([]byte, 32)
-	n, err := conn.Read(ack)
-	if err != nil {
-		conn.Close()
-		return fmt.Errorf("failed to read ack: %w", err)
-	}
-	conn.SetReadDeadline(time.Time{})
-
-	ackStr := string(ack[:n])
-	if ackStr != "OK" {
-		conn.Close()
-		return fmt.Errorf("authentication failed: %s", ackStr)
-	}
-
-	log.Println("Authentication successful")
-
-	// Create yamux session
-	config := yamux.DefaultConfig()
-	config.EnableKeepAlive = true
-	config.KeepAliveInterval = 30 * time.Second
-
-	session, err := yamux.Server(conn, config)
-	if err != nil {
-		conn.Close()
-		return fmt.Errorf("failed to create yamux session: %w", err)
-	}
-
-	c.sessionMu.Lock()
-	if c.session != nil {
-		c.session.Close()
-	}
-	c.session = session
-	c.sessionMu.Unlock()
-
-	return nil
-}
-
-func (c *Client) handleStreams() {
-	c.sessionMu.RLock()
-	session := c.session
-	c.sessionMu.RUnlock()
-
-	if session == nil {
-		return
-	}
-
-	for {
-		stream, err := session.Accept()
-		if err != nil {
-			log.Printf("Stream accept error: %v", err)
-			return
-		}
-
-		c.connectionsMu.Lock()
-		c.connections++
-		connNum := c.connections
-		c.connectionsMu.Unlock()
-
-		go c.handleStream(stream, connNum)
-	}
-}
-
-func (c *Client) handleStream(stream net.Conn, connNum int64) {
-	defer stream.Close()
-
-	log.Printf("[%d] New stream, connecting to %s...", connNum, target)
-
-	// Connect to target
-	haConn, err := net.DialTimeout("tcp", target, 10*time.Second)
-	if err != nil {
-		log.Printf("[%d] Failed to connect to HA: %v", connNum, err)
-		return
-	}
-	defer haConn.Close()
-
-	log.Printf("[%d] Connected to Home Assistant, proxying...", connNum)
-
-	// Bidirectional copy
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		io.Copy(haConn, stream)
-		haConn.Close()
-	}()
-
-	go func() {
-		defer wg.Done()
-		io.Copy(stream, haConn)
-		stream.Close()
-	}()
-
-	wg.Wait()
-	log.Printf("[%d] Stream closed", connNum)
+	c.Run()
 }

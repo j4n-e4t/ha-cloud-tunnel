@@ -16,6 +16,7 @@ services:
       - SERVER_ADDR=server:7777
       - TOKEN=${TOKEN}
       - FINGERPRINT=${FINGERPRINT}
+      - ACCESS_DISABLED=false
     ports:
       - "8099:8099" # Info page
     depends_on:

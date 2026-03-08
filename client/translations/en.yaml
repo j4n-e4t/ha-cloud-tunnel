@@ -4,7 +4,7 @@ configuration:
     description: "Tunnel server address with port (e.g., your-app.railway.app:7777)"
   token:
     name: Token
-    description: "32-character setup token from the server"
+    description: "Setup token from the server (sk-...)"
   fingerprint:
     name: Fingerprint
     description: "Server certificate fingerprint (SHA256:...) for secure connection"

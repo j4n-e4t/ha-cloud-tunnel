@@ -30,7 +30,7 @@ Secure remote access to Home Assistant via a reverse TCP tunnel.
 2. Install "HA Cloud Tunnel" add-on
 3. Configure:
    - `server_addr`: Your Railway server address with port 7777 (e.g., `your-app.railway.app:7777`)
-   - `token`: The 32-character setup token from the server
+   - `token`: The setup token from the server (sk-...)
 4. Start the add-on
 
 ## Local Testing
@@ -64,7 +64,7 @@ Then access:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `SERVER_ADDR` | Server address with tunnel port | Required |
-| `TOKEN` | 32-character setup token | Required |
+| `TOKEN` | Setup token (sk-{32 hex chars}) | Required |
 | `TARGET` | Proxy target address | `homeassistant:8123` |
 
 ## Ports
