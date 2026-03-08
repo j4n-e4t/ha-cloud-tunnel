@@ -274,13 +274,9 @@ func (s *Server) handleTunnelConnection(conn net.Conn) {
 }
 
 func (s *Server) startPublicServer() {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", s.handleHealth)
-	mux.HandleFunc("/", s.handlePublic)
-
 	server := &http.Server{
 		Addr:    publicPort,
-		Handler: mux,
+		Handler: http.HandlerFunc(s.handlePublic),
 	}
 
 	log.Printf("Public server started on %s", publicPort)
@@ -370,7 +366,7 @@ func (s *Server) serveInfoPage(w http.ResponseWriter, r *http.Request) {
 		serverAddrHTML := ""
 		if s.serverAddr != "" {
 			serverAddrHTML = fmt.Sprintf(`<label>Server Address</label>
-<div class="credential">%s</div>
+<div class="credential-row"><span class="credential" id="addr">%s</span><button onclick="copy('addr')">Copy</button></div>
 `, s.serverAddr)
 		}
 
@@ -381,8 +377,12 @@ func (s *Server) serveInfoPage(w http.ResponseWriter, r *http.Request) {
 <meta http-equiv="refresh" content="5">
 <style>
 body{font-family:system-ui,sans-serif;max-width:700px;margin:40px auto;padding:20px;text-align:center}
-.credential{background:#f5f5f5;padding:15px;margin:10px 0;border-radius:8px;font-family:monospace;font-size:0.95rem;word-break:break-all}
-label{font-weight:bold;display:block;margin-top:20px}
+.credential-row{display:flex;gap:10px;align-items:center;margin:10px 0}
+.credential{flex:1;background:#f5f5f5;padding:15px;border-radius:8px;font-family:monospace;font-size:0.95rem;word-break:break-all;text-align:left}
+label{font-weight:bold;display:block;margin-top:20px;text-align:left}
+button{padding:10px 20px;border:none;border-radius:8px;background:#4CAF50;color:white;cursor:pointer;font-size:0.9rem}
+button:hover{background:#45a049}
+button:active{background:#3d8b40}
 </style>
 </head>
 <body>
@@ -390,13 +390,19 @@ label{font-weight:bold;display:block;margin-top:20px}
 <p>Copy these credentials to your client configuration:</p>
 
 %s<label>Token</label>
-<div class="credential">%s</div>
+<div class="credential-row"><span class="credential" id="token">%s</span><button onclick="copy('token')">Copy</button></div>
 
 <label>Fingerprint</label>
-<div class="credential">%s</div>
+<div class="credential-row"><span class="credential" id="fp">%s</span><button onclick="copy('fp')">Copy</button></div>
 
 <hr>
 <p>Status: waiting for client...</p>
+<script>
+function copy(id) {
+  const text = document.getElementById(id).textContent;
+  navigator.clipboard.writeText(text);
+}
+</script>
 </body>
 </html>`, serverAddrHTML, s.token, s.fingerprint)
 		w.Write([]byte(html))
@@ -420,16 +426,3 @@ label{font-weight:bold;display:block;margin-top:20px}
 	w.Write([]byte(html))
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	s.sessionMu.RLock()
-	tunnelActive := s.session != nil
-	s.sessionMu.RUnlock()
-
-	if tunnelActive {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	} else {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("NO_TUNNEL"))
-	}
-}
