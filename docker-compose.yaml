@@ -1,0 +1,33 @@
+services:
+  server:
+    build: ./server
+    ports:
+      - "7777:7777" # Tunnel port
+      - "8080:8080" # Info page
+      - "80:80" # Public ingress (mapped to 8000 for local testing)
+    volumes:
+      - server-data:/data
+
+  client:
+    build:
+      context: ./client
+      args:
+        BUILD_FROM: alpine:3.19
+    environment:
+      - SERVER_ADDR=server:7777
+      - TOKEN=${TOKEN}
+      - TARGET=homeassistant:80
+    ports:
+      - "8099:8099" # Info page
+    depends_on:
+      - server
+    command: ["/app/client"]
+
+  # Mock Home Assistant for testing
+  homeassistant:
+    image: nginx:alpine
+    ports:
+      - "8123:80" # Home Assistant mock
+
+volumes:
+  server-data:

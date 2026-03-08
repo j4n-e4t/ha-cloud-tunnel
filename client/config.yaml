@@ -1,0 +1,24 @@
+# Home Assistant Add-on configuration
+name: "HA Cloud Tunnel"
+description: "Secure remote access to Home Assistant via cloud tunnel"
+version: "1.0.0"
+slug: "ha_cloud_tunnel"
+init: false
+arch:
+  - amd64
+  - aarch64
+  - armv7
+  - armhf
+  - i386
+ports:
+  8099/tcp: 8099
+ports_description:
+  8099/tcp: "Info web interface"
+options:
+  server_addr: ""
+  token: ""
+  target: "homeassistant:8123"
+schema:
+  server_addr: str?
+  token: password?
+  target: str?

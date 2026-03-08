@@ -1,0 +1,10 @@
+configuration:
+  server_addr:
+    name: Server Address
+    description: "Tunnel server address with port (e.g., your-app.railway.app:7777)"
+  token:
+    name: Token
+    description: "32-character setup token from the server"
+  target:
+    name: Target
+    description: "Local address to proxy to (default: homeassistant:8123)"
