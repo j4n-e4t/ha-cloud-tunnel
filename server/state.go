@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -130,6 +131,7 @@ func (s *State) GetToken() string {
 // VerifyOrBindClientKey checks the client key against the stored one.
 // On first connection (no stored key), binds to the provided key and saves.
 // Returns true if the key is valid, false if it doesn't match.
+// Uses constant-time comparison to prevent timing attacks.
 func (s *State) VerifyOrBindClientKey(key string) bool {
 	s.mu.Lock()
 
@@ -142,7 +144,8 @@ func (s *State) VerifyOrBindClientKey(key string) bool {
 		return true
 	}
 
-	match := s.clientKey == key
+	// Use constant-time comparison to prevent timing attacks
+	match := subtle.ConstantTimeCompare([]byte(s.clientKey), []byte(key)) == 1
 	s.mu.Unlock()
 	return match
 }
@@ -195,11 +198,12 @@ func (s *State) GetTLSConfig() (*tls.Config, string, error) {
 	return tlsConfig, fingerprint, nil
 }
 
-// generateCert creates a new self-signed RSA certificate valid for 10 years.
+// generateCert creates a new self-signed RSA certificate valid for 1 year.
 func (s *State) generateCert() {
 	log.Println("Generating new self-signed certificate...")
 
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	// Use 4096-bit RSA for stronger security
+	privateKey, err := rsa.GenerateKey(rand.Reader, 4096)
 	if err != nil {
 		log.Fatalf("Failed to generate private key: %v", err)
 	}
@@ -216,7 +220,7 @@ func (s *State) generateCert() {
 			CommonName:   "HA Cloud Tunnel Server",
 		},
 		NotBefore:             time.Now(),
-		NotAfter:              time.Now().AddDate(10, 0, 0),
+		NotAfter:              time.Now().AddDate(1, 0, 0), // 1 year validity
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,

@@ -21,12 +21,15 @@ import (
 
 // Configuration constants
 const (
-	DataDir     = "/data"           // Directory for persistent state
-	StateFile   = "/data/state.json" // Path to state file
-	TunnelPort  = ":7777"           // Port for TLS tunnel connections
-	PublicPort  = ":80"             // Port for public HTTP server
-	TokenLength = 16                // Token length in bytes (32 hex chars + "sk-" prefix)
-	ReadTimeout = 10 * time.Second  // Timeout for reading client token
+	DataDir            = "/data"            // Directory for persistent state
+	StateFile          = "/data/state.json" // Path to state file
+	TunnelPort         = ":7777"            // Port for TLS tunnel connections
+	PublicPort         = ":80"              // Port for public HTTP server
+	TokenLength        = 16                 // Token length in bytes (32 hex chars + "sk-" prefix)
+	ReadTimeout        = 10 * time.Second   // Timeout for reading client token
+	MaxTunnelConns     = 10                 // Maximum concurrent tunnel connections
+	MaxHTTPConns       = 1000               // Maximum concurrent HTTP connections
+	MaxRequestBodySize = 10 * 1024 * 1024   // 10MB max request body
 )
 
 // main initializes the server and starts both the tunnel listener and HTTP server.

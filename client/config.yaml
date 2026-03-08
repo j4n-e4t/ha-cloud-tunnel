@@ -14,7 +14,9 @@ options:
   server_addr: ""
   token: ""
   fingerprint: ""
+  target_addr: "homeassistant:8123"
 schema:
   server_addr: str?
   token: password?
   fingerprint: str?
+  target_addr: str?

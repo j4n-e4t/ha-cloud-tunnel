@@ -15,6 +15,7 @@ type Client struct {
 	token       string         // Authentication token
 	clientKey   string         // Client key for server binding
 	fingerprint string         // Expected server certificate fingerprint
+	targetAddr  string         // Local target address to proxy to
 	session     *yamux.Session // Active multiplexed session (nil if disconnected)
 	sessionMu   sync.RWMutex   // Protects session field
 	streamCount int64          // Counter for logging stream IDs
@@ -22,12 +23,13 @@ type Client struct {
 }
 
 // NewClient creates a new tunnel client with the given configuration.
-func NewClient(serverAddr, token, clientKey, fingerprint string) *Client {
+func NewClient(serverAddr, token, clientKey, fingerprint, targetAddr string) *Client {
 	return &Client{
 		serverAddr:  serverAddr,
 		token:       token,
 		clientKey:   clientKey,
 		fingerprint: fingerprint,
+		targetAddr:  targetAddr,
 	}
 }
 
@@ -80,7 +82,7 @@ func (c *Client) NextStreamID() int64 {
 }
 
 // handleStreams accepts incoming streams from the server and spawns
-// goroutines to proxy them to Home Assistant.
+// goroutines to proxy them to the target.
 func (c *Client) handleStreams() {
 	session := c.GetSession()
 	if session == nil {
@@ -95,6 +97,6 @@ func (c *Client) handleStreams() {
 		}
 
 		streamID := c.NextStreamID()
-		go proxyStream(stream, streamID)
+		go proxyStream(stream, streamID, c.targetAddr)
 	}
 }

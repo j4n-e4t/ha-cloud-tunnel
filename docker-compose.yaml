@@ -6,6 +6,14 @@ services:
       - "80:80" # Public Ingress
     volumes:
       - server-data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256M
+        reservations:
+          memory: 64M
+    restart: unless-stopped
 
   client:
     build:
@@ -16,18 +24,32 @@ services:
       - SERVER_ADDR=server:7777
       - TOKEN=${TOKEN}
       - FINGERPRINT=${FINGERPRINT}
-      - ACCESS_DISABLED=false
-    ports:
-      - "8099:8099" # Info page
+      - TARGET_ADDR=homeassistant:80
+    volumes:
+      - client-data:/data
     depends_on:
       - server
     command: ["/app/client"]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+        reservations:
+          memory: 32M
+    restart: unless-stopped
 
   # Mock Home Assistant for testing
   homeassistant:
     image: nginx:alpine
     ports:
       - "8123:80" # Home Assistant mock
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
 
 volumes:
   server-data:
+  client-data:

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // botPatterns contains User-Agent substrings that identify bots and crawlers.
@@ -27,6 +28,9 @@ var botPatterns = []string{
 	"headlesschrome", "phantomjs", "selenium",
 }
 
+// activeHTTPConns tracks active HTTP connections for limiting
+var activeHTTPConns int64
+
 // StartHTTPServer starts the public HTTP server that proxies requests through the tunnel.
 // When no tunnel is connected, it serves an info page with setup instructions.
 // This function blocks forever.
@@ -35,15 +39,42 @@ func StartHTTPServer(s *Server) {
 		handleHTTPRequest(s, w, r)
 	})
 
+	// Chain middleware: security headers -> connection limit -> bot blocking -> handler
 	srv := &http.Server{
-		Addr:    PublicPort,
-		Handler: blockBots(handler),
+		Addr:           PublicPort,
+		Handler:        securityHeaders(connectionLimit(blockBots(handler))),
+		MaxHeaderBytes: 1 << 20, // 1MB max header size
 	}
 
-	log.Printf("Public server started on %s", PublicPort)
+	log.Printf("Public server started on %s (max %d concurrent)", PublicPort, MaxHTTPConns)
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("Public server failed: %v", err)
 	}
+}
+
+// securityHeaders adds security headers to all responses
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// connectionLimit enforces maximum concurrent HTTP connections
+func connectionLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		current := atomic.AddInt64(&activeHTTPConns, 1)
+		defer atomic.AddInt64(&activeHTTPConns, -1)
+
+		if current > MaxHTTPConns {
+			http.Error(w, "Server too busy", http.StatusServiceUnavailable)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // blockBots is middleware that rejects requests from known bots and crawlers.

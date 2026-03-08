@@ -2,3 +2,11 @@
 *.exe
 client/ha-cloud-tunnel-client
 server/ha-cloud-tunnel-server
+
+# Environment files (may contain secrets)
+.env
+.env.*
+*.env
+
+# State files
+state.json

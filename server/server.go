@@ -25,8 +25,8 @@ type Server struct {
 func NewServer() (*Server, error) {
 	s := &Server{}
 
-	// Ensure data directory exists for state persistence
-	if err := os.MkdirAll(DataDir, 0755); err != nil {
+	// Ensure data directory exists for state persistence (restricted permissions)
+	if err := os.MkdirAll(DataDir, 0700); err != nil {
 		log.Printf("Warning: could not create data directory: %v", err)
 	}
 

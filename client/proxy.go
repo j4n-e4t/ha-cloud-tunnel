@@ -7,38 +7,38 @@ import (
 	"sync"
 )
 
-// proxyStream connects an incoming tunnel stream to the local Home Assistant
-// instance and copies data bidirectionally until either side closes.
-func proxyStream(stream net.Conn, streamID int64) {
+// proxyStream connects an incoming tunnel stream to the local target
+// and copies data bidirectionally until either side closes.
+func proxyStream(stream net.Conn, streamID int64, targetAddr string) {
 	defer stream.Close()
 
-	log.Printf("[%d] New stream, connecting to %s...", streamID, TargetAddr)
+	log.Printf("[%d] New stream, connecting to %s...", streamID, targetAddr)
 
-	// Connect to local Home Assistant
-	haConn, err := net.DialTimeout("tcp", TargetAddr, ProxyTimeout)
+	// Connect to local target
+	targetConn, err := net.DialTimeout("tcp", targetAddr, ProxyTimeout)
 	if err != nil {
-		log.Printf("[%d] Failed to connect to HA: %v", streamID, err)
+		log.Printf("[%d] Failed to connect to target: %v", streamID, err)
 		return
 	}
-	defer haConn.Close()
+	defer targetConn.Close()
 
-	log.Printf("[%d] Connected to Home Assistant, proxying...", streamID)
+	log.Printf("[%d] Connected to target, proxying...", streamID)
 
-	// Bidirectional copy between tunnel stream and Home Assistant
+	// Bidirectional copy between tunnel stream and target
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Stream -> Home Assistant
+	// Stream -> Target
 	go func() {
 		defer wg.Done()
-		io.Copy(haConn, stream)
-		haConn.Close()
+		io.Copy(targetConn, stream)
+		targetConn.Close()
 	}()
 
-	// Home Assistant -> Stream
+	// Target -> Stream
 	go func() {
 		defer wg.Done()
-		io.Copy(stream, haConn)
+		io.Copy(stream, targetConn)
 		stream.Close()
 	}()
 

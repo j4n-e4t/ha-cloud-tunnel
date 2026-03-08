@@ -22,19 +22,21 @@ import (
 
 // Configuration constants
 const (
-	TargetAddr     = "homeassistant:8123" // Local Home Assistant address
-	ReconnectDelay = 5 * time.Second      // Delay between reconnection attempts
-	ConnectTimeout = 30 * time.Second     // Timeout for establishing connection
-	AckTimeout     = 10 * time.Second     // Timeout for authentication response
-	ProxyTimeout   = 10 * time.Second     // Timeout for connecting to Home Assistant
+	DefaultTargetAddr = "homeassistant:8123" // Default local Home Assistant address
+	ReconnectDelay    = 5 * time.Second      // Delay between reconnection attempts
+	ConnectTimeout    = 30 * time.Second     // Timeout for establishing connection
+	AckTimeout        = 10 * time.Second     // Timeout for authentication response
+	ProxyTimeout      = 10 * time.Second     // Timeout for connecting to target
 )
 
 // main loads configuration from environment variables and starts the tunnel client.
 // Required environment variables:
 // - SERVER_ADDR: Server address (host:port)
 // - TOKEN: Authentication token (sk-{32-hex-chars})
-// - CLIENT_KEY: Client key for binding (ck-{32-hex-chars})
 // - FINGERPRINT: Server certificate fingerprint (SHA256:xxxx)
+// Optional:
+// - TARGET_ADDR: Local target address (default: homeassistant:8123)
+// Client key is auto-generated and stored in /data/state.json
 func main() {
 	serverAddr := os.Getenv("SERVER_ADDR")
 	if serverAddr == "" {
@@ -49,14 +51,6 @@ func main() {
 		log.Fatal("TOKEN must be in format sk-{32-hex-chars}")
 	}
 
-	clientKey := os.Getenv("CLIENT_KEY")
-	if clientKey == "" {
-		log.Fatal("CLIENT_KEY environment variable is required")
-	}
-	if len(clientKey) != 35 || clientKey[:3] != "ck-" {
-		log.Fatal("CLIENT_KEY must be in format ck-{32-hex-chars}")
-	}
-
 	fingerprint := os.Getenv("FINGERPRINT")
 	if fingerprint == "" {
 		log.Fatal("FINGERPRINT environment variable is required")
@@ -65,9 +59,20 @@ func main() {
 	fingerprint = strings.ToUpper(strings.TrimPrefix(fingerprint, "SHA256:"))
 	fingerprint = "SHA256:" + fingerprint
 
-	c := NewClient(serverAddr, token, clientKey, fingerprint)
+	targetAddr := os.Getenv("TARGET_ADDR")
+	if targetAddr == "" {
+		targetAddr = DefaultTargetAddr
+	}
+
+	// Load or generate client key
+	state := GetClientState()
+	clientKey := state.GetClientKey()
+
+	c := NewClient(serverAddr, token, clientKey, fingerprint, targetAddr)
 
 	log.Printf("Server: %s", serverAddr)
+	log.Printf("Target: %s", targetAddr)
+	log.Printf("Client key: %s...", clientKey[:8])
 	log.Printf("Expected fingerprint: %s", fingerprint)
 
 	c.Run()
