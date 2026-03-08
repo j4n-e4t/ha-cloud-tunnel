@@ -10,17 +10,10 @@ FROM alpine:3.19
 
 RUN apk --no-cache add ca-certificates
 
-# Create non-root user
-RUN addgroup -g 1000 tunnel && \
-    adduser -u 1000 -G tunnel -s /bin/sh -D tunnel
-
 WORKDIR /app
 COPY --from=builder /server /app/server
 
-# Create data directory with proper ownership
-RUN mkdir -p /data && chown tunnel:tunnel /data
-
-USER tunnel
+RUN mkdir -p /data
 
 EXPOSE 80 7777
 
