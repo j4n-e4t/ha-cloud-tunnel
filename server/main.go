@@ -36,6 +36,7 @@ const (
 type Server struct {
 	token           string
 	fingerprint     string
+	serverAddr      string
 	tlsConfig       *tls.Config
 	session         *yamux.Session
 	sessionMu       sync.RWMutex
@@ -66,6 +67,14 @@ func main() {
 	s.tlsConfig = tlsConfig
 	s.fingerprint = fingerprint
 	log.Printf("Certificate fingerprint: %s", fingerprint)
+
+	// Get server address from Railway env or construct default
+	tcpDomain := os.Getenv("RAILWAY_TCP_PROXY_DOMAIN")
+	tcpPort := os.Getenv("RAILWAY_TCP_PROXY_PORT")
+	if tcpDomain != "" && tcpPort != "" {
+		s.serverAddr = tcpDomain + ":" + tcpPort
+		log.Printf("Server address (Railway TCP Proxy): %s", s.serverAddr)
+	}
 
 	// Start listeners
 	go s.startTunnelListener()
@@ -358,6 +367,13 @@ func (s *Server) serveInfoPage(w http.ResponseWriter, r *http.Request) {
 
 	if !connectedOnce {
 		// Setup page - shown until first connection
+		serverAddrHTML := ""
+		if s.serverAddr != "" {
+			serverAddrHTML = fmt.Sprintf(`<label>Server Address</label>
+<div class="credential">%s</div>
+`, s.serverAddr)
+		}
+
 		html := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
@@ -373,7 +389,7 @@ label{font-weight:bold;display:block;margin-top:20px}
 <h1>HA Cloud Tunnel</h1>
 <p>Copy these credentials to your client configuration:</p>
 
-<label>Token</label>
+%s<label>Token</label>
 <div class="credential">%s</div>
 
 <label>Fingerprint</label>
@@ -382,7 +398,7 @@ label{font-weight:bold;display:block;margin-top:20px}
 <hr>
 <p>Status: waiting for client...</p>
 </body>
-</html>`, s.token, s.fingerprint)
+</html>`, serverAddrHTML, s.token, s.fingerprint)
 		w.Write([]byte(html))
 		return
 	}
