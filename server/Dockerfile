@@ -15,6 +15,6 @@ COPY --from=builder /server /app/server
 # Create data directory
 RUN mkdir -p /data
 
-EXPOSE 80 7777 8080
+EXPOSE 80 7777
 
 CMD ["/app/server"]

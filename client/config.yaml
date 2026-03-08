@@ -17,8 +17,8 @@ ports_description:
 options:
   server_addr: ""
   token: ""
-  target: "homeassistant:8123"
+  fingerprint: ""
 schema:
   server_addr: str?
   token: password?
-  target: str?
+  fingerprint: str?

@@ -3,10 +3,9 @@
 
 export SERVER_ADDR="$(bashio::config 'server_addr')"
 export TOKEN="$(bashio::config 'token')"
-export TARGET="$(bashio::config 'target')"
+export FINGERPRINT="$(bashio::config 'fingerprint')"
 
 bashio::log.info "Starting HA Cloud Tunnel client..."
 bashio::log.info "Server address: ${SERVER_ADDR}"
-bashio::log.info "Target: ${TARGET}"
 
 exec /app/client

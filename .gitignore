@@ -1,0 +1,4 @@
+# Binaries
+*.exe
+client/ha-cloud-tunnel-client
+server/ha-cloud-tunnel-server

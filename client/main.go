@@ -1,12 +1,16 @@
 package main
 
 import (
+	"crypto/sha256"
+	"crypto/tls"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +19,7 @@ import (
 
 const (
 	infoPort       = ":8099"
+	target         = "homeassistant:8123"
 	reconnectDelay = 5 * time.Second
 	connectTimeout = 30 * time.Second
 )
@@ -22,7 +27,7 @@ const (
 type Client struct {
 	serverAddr    string
 	token         string
-	target        string
+	fingerprint   string
 	session       *yamux.Session
 	sessionMu     sync.RWMutex
 	status        string
@@ -36,29 +41,34 @@ type Client struct {
 func main() {
 	serverAddr := os.Getenv("SERVER_ADDR")
 	if serverAddr == "" {
-		serverAddr = "localhost:7000"
+		serverAddr = "localhost:7777"
 	}
 
 	token := os.Getenv("TOKEN")
 	if token == "" {
 		log.Fatal("TOKEN environment variable is required")
 	}
-
 	if len(token) != 32 {
 		log.Fatal("TOKEN must be exactly 32 characters")
 	}
 
-	target := os.Getenv("TARGET")
-	if target == "" {
-		target = "homeassistant:8123"
+	fingerprint := os.Getenv("FINGERPRINT")
+	if fingerprint == "" {
+		log.Fatal("FINGERPRINT environment variable is required")
 	}
+	// Normalize fingerprint
+	fingerprint = strings.ToUpper(strings.TrimPrefix(fingerprint, "SHA256:"))
+	fingerprint = "SHA256:" + fingerprint
 
 	c := &Client{
-		serverAddr: serverAddr,
-		token:      token,
-		target:     target,
-		status:     "disconnected",
+		serverAddr:  serverAddr,
+		token:       token,
+		fingerprint: fingerprint,
+		status:      "disconnected",
 	}
+
+	log.Printf("Server: %s", serverAddr)
+	log.Printf("Expected fingerprint: %s", fingerprint)
 
 	// Start info HTTP server
 	go c.startInfoServer()
@@ -120,15 +130,34 @@ func (c *Client) connectLoop() {
 }
 
 func (c *Client) connect() error {
-	// Connect to server
-	conn, err := net.DialTimeout("tcp", c.serverAddr, connectTimeout)
+	// TLS config that verifies fingerprint
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: true, // We verify manually via fingerprint
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) == 0 {
+				return fmt.Errorf("no server certificate")
+			}
+			cert := cs.PeerCertificates[0]
+			hash := sha256.Sum256(cert.Raw)
+			actualFingerprint := "SHA256:" + strings.ToUpper(hex.EncodeToString(hash[:]))
+
+			if actualFingerprint != c.fingerprint {
+				return fmt.Errorf("fingerprint mismatch: expected %s, got %s", c.fingerprint, actualFingerprint)
+			}
+			log.Println("Server fingerprint verified")
+			return nil
+		},
+	}
+
+	// Connect with TLS
+	dialer := &net.Dialer{Timeout: connectTimeout}
+	conn, err := tls.DialWithDialer(dialer, "tcp", c.serverAddr, tlsConfig)
 	if err != nil {
-		return fmt.Errorf("dial failed: %w", err)
+		return fmt.Errorf("TLS dial failed: %w", err)
 	}
 
 	// Send token
-	_, err = conn.Write([]byte(c.token))
-	if err != nil {
+	if _, err := conn.Write([]byte(c.token)); err != nil {
 		conn.Close()
 		return fmt.Errorf("failed to send token: %w", err)
 	}
@@ -151,7 +180,7 @@ func (c *Client) connect() error {
 
 	log.Println("Authentication successful")
 
-	// Create yamux session (server mode - we accept streams from server)
+	// Create yamux session
 	config := yamux.DefaultConfig()
 	config.EnableKeepAlive = true
 	config.KeepAliveInterval = 30 * time.Second
@@ -200,10 +229,10 @@ func (c *Client) handleStreams() {
 func (c *Client) handleStream(stream net.Conn, connNum int64) {
 	defer stream.Close()
 
-	log.Printf("[%d] New stream, connecting to %s...", connNum, c.target)
+	log.Printf("[%d] New stream, connecting to %s...", connNum, target)
 
 	// Connect to target
-	haConn, err := net.DialTimeout("tcp", c.target, 10*time.Second)
+	haConn, err := net.DialTimeout("tcp", target, 10*time.Second)
 	if err != nil {
 		log.Printf("[%d] Failed to connect to HA: %v", connNum, err)
 		return
@@ -233,11 +262,12 @@ func (c *Client) handleStream(stream net.Conn, connNum int64) {
 }
 
 func (c *Client) startInfoServer() {
-	http.HandleFunc("/", c.handleInfo)
-	http.HandleFunc("/health", c.handleHealth)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", c.handleInfo)
+	mux.HandleFunc("/health", c.handleHealth)
 
 	log.Printf("Info server started on %s", infoPort)
-	if err := http.ListenAndServe(infoPort, nil); err != nil {
+	if err := http.ListenAndServe(infoPort, mux); err != nil {
 		log.Printf("Info server failed: %v", err)
 	}
 }
@@ -248,14 +278,17 @@ func (c *Client) handleInfo(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	// Error page - shown when there's an auth or connection error
+	// Error page
 	if lastError != "" {
 		html := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
 <title>HA Cloud Tunnel - Error</title>
 <meta http-equiv="refresh" content="5">
-<style>body{font-family:monospace;max-width:600px;margin:40px auto;padding:20px}pre{background:#fff0f0;padding:10px;overflow-x:auto}</style>
+<style>
+body{font-family:system-ui,sans-serif;max-width:600px;margin:40px auto;padding:20px;text-align:center}
+pre{background:#fff0f0;padding:10px;overflow-x:auto;text-align:left}
+</style>
 </head>
 <body>
 <h1>HA Cloud Tunnel</h1>
@@ -263,28 +296,28 @@ func (c *Client) handleInfo(w http.ResponseWriter, r *http.Request) {
 <p>Error:</p>
 <pre>%s</pre>
 <hr>
-<p>Server: %s<br>Target: %s</p>
+<p>Server: %s</p>
 </body>
-</html>`, status, lastError, c.serverAddr, c.target)
+</html>`, status, lastError, c.serverAddr)
 		w.Write([]byte(html))
 		return
 	}
 
-	// Status page - normal operation
+	// Status page
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
 <title>HA Cloud Tunnel</title>
 <meta http-equiv="refresh" content="5">
-<style>body{font-family:monospace;max-width:600px;margin:40px auto;padding:20px}</style>
+<style>body{font-family:system-ui,sans-serif;max-width:600px;margin:40px auto;padding:20px;text-align:center}</style>
 </head>
 <body>
 <h1>HA Cloud Tunnel</h1>
 <p>Status: %s</p>
 <hr>
-<p>Server: %s<br>Target: %s</p>
+<p>Server: %s</p>
 </body>
-</html>`, status, c.serverAddr, c.target)
+</html>`, status, c.serverAddr)
 	w.Write([]byte(html))
 }
 

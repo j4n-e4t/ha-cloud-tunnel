@@ -3,4 +3,9 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-restartPolicyType = "always"
+healthcheckPath = "/health"
+healthcheckTimeout = 10
+
+[[mounts]]
+source = "data"
+destination = "/data"

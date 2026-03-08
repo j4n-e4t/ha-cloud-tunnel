@@ -3,8 +3,7 @@ services:
     build: ./server
     ports:
       - "7777:7777" # Tunnel port
-      - "8080:8080" # Info page
-      - "80:80" # Public ingress (mapped to 8000 for local testing)
+      - "80:80" # Public Ingress
     volumes:
       - server-data:/data
 
@@ -16,7 +15,7 @@ services:
     environment:
       - SERVER_ADDR=server:7777
       - TOKEN=${TOKEN}
-      - TARGET=homeassistant:80
+      - FINGERPRINT=${FINGERPRINT}
     ports:
       - "8099:8099" # Info page
     depends_on:

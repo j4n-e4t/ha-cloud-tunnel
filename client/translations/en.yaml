@@ -5,6 +5,6 @@ configuration:
   token:
     name: Token
     description: "32-character setup token from the server"
-  target:
-    name: Target
-    description: "Local address to proxy to (default: homeassistant:8123)"
+  fingerprint:
+    name: Fingerprint
+    description: "Server certificate fingerprint (SHA256:...) for secure connection"
