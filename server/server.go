@@ -26,7 +26,7 @@ func NewServer() (*Server, error) {
 	s := &Server{}
 
 	// Ensure data directory exists for state persistence
-	if err := os.MkdirAll(DataDir, 0755); err != nil {
+	if err := os.MkdirAll(DataDir, 0777); err != nil {
 		log.Printf("Warning: could not create data directory: %v", err)
 	}
 
