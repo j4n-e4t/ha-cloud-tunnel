@@ -36,7 +36,7 @@ func GetClientState() *ClientState {
 		clientStateInstance = &ClientState{}
 
 		// Ensure data directory exists
-		if err := os.MkdirAll(StateDir, 0700); err != nil {
+		if err := os.MkdirAll(StateDir, 0755); err != nil {
 			log.Printf("Warning: could not create data directory: %v", err)
 		}
 
