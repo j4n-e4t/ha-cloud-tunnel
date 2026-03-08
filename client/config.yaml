@@ -10,10 +10,6 @@ arch:
   - armv7
   - armhf
   - i386
-ports:
-  8099/tcp: 8099
-ports_description:
-  8099/tcp: "Info web interface"
 options:
   server_addr: ""
   token: ""

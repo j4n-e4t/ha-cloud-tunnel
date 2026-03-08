@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -18,7 +17,6 @@ import (
 )
 
 const (
-	infoPort       = ":8099"
 	target         = "homeassistant:8123"
 	reconnectDelay = 5 * time.Second
 	connectTimeout = 30 * time.Second
@@ -30,10 +28,6 @@ type Client struct {
 	fingerprint   string
 	session       *yamux.Session
 	sessionMu     sync.RWMutex
-	status        string
-	statusMu      sync.RWMutex
-	lastError     string
-	lastErrorMu   sync.RWMutex
 	connections   int64
 	connectionsMu sync.Mutex
 }
@@ -64,66 +58,32 @@ func main() {
 		serverAddr:  serverAddr,
 		token:       token,
 		fingerprint: fingerprint,
-		status:      "disconnected",
 	}
 
 	log.Printf("Server: %s", serverAddr)
 	log.Printf("Expected fingerprint: %s", fingerprint)
 
-	// Start info HTTP server
-	go c.startInfoServer()
-
 	// Main connection loop
 	c.connectLoop()
 }
 
-func (c *Client) setStatus(status string) {
-	c.statusMu.Lock()
-	c.status = status
-	c.statusMu.Unlock()
-}
-
-func (c *Client) getStatus() string {
-	c.statusMu.RLock()
-	defer c.statusMu.RUnlock()
-	return c.status
-}
-
-func (c *Client) setLastError(err string) {
-	c.lastErrorMu.Lock()
-	c.lastError = err
-	c.lastErrorMu.Unlock()
-}
-
-func (c *Client) getLastError() string {
-	c.lastErrorMu.RLock()
-	defer c.lastErrorMu.RUnlock()
-	return c.lastError
-}
-
 func (c *Client) connectLoop() {
 	for {
-		c.setStatus("connecting")
 		log.Printf("Connecting to server at %s...", c.serverAddr)
 
 		err := c.connect()
 		if err != nil {
-			c.setStatus("disconnected")
-			c.setLastError(err.Error())
 			log.Printf("Connection failed: %v", err)
 			log.Printf("Reconnecting in %v...", reconnectDelay)
 			time.Sleep(reconnectDelay)
 			continue
 		}
 
-		c.setStatus("connected")
-		c.setLastError("")
 		log.Println("Connected to server, handling streams...")
 
 		// Handle incoming streams
 		c.handleStreams()
 
-		c.setStatus("disconnected")
 		log.Printf("Disconnected, reconnecting in %v...", reconnectDelay)
 		time.Sleep(reconnectDelay)
 	}
@@ -259,76 +219,4 @@ func (c *Client) handleStream(stream net.Conn, connNum int64) {
 
 	wg.Wait()
 	log.Printf("[%d] Stream closed", connNum)
-}
-
-func (c *Client) startInfoServer() {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", c.handleInfo)
-	mux.HandleFunc("/health", c.handleHealth)
-
-	log.Printf("Info server started on %s", infoPort)
-	if err := http.ListenAndServe(infoPort, mux); err != nil {
-		log.Printf("Info server failed: %v", err)
-	}
-}
-
-func (c *Client) handleInfo(w http.ResponseWriter, r *http.Request) {
-	status := c.getStatus()
-	lastError := c.getLastError()
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-	// Error page
-	if lastError != "" {
-		html := fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head>
-<title>HA Cloud Tunnel - Error</title>
-<meta http-equiv="refresh" content="5">
-<style>
-body{font-family:system-ui,sans-serif;max-width:600px;margin:40px auto;padding:20px;text-align:center}
-pre{background:#fff0f0;padding:10px;overflow-x:auto;text-align:left}
-</style>
-</head>
-<body>
-<h1>HA Cloud Tunnel</h1>
-<p>Status: %s</p>
-<p>Error:</p>
-<pre>%s</pre>
-<hr>
-<p>Server: %s</p>
-</body>
-</html>`, status, lastError, c.serverAddr)
-		w.Write([]byte(html))
-		return
-	}
-
-	// Status page
-	html := fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head>
-<title>HA Cloud Tunnel</title>
-<meta http-equiv="refresh" content="5">
-<style>body{font-family:system-ui,sans-serif;max-width:600px;margin:40px auto;padding:20px;text-align:center}</style>
-</head>
-<body>
-<h1>HA Cloud Tunnel</h1>
-<p>Status: %s</p>
-<hr>
-<p>Server: %s</p>
-</body>
-</html>`, status, c.serverAddr)
-	w.Write([]byte(html))
-}
-
-func (c *Client) handleHealth(w http.ResponseWriter, r *http.Request) {
-	status := c.getStatus()
-
-	if status == "connected" {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	} else {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(status))
-	}
 }
