@@ -6,27 +6,9 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 )
-
-// botPatterns contains User-Agent substrings that identify bots and crawlers.
-// These requests are blocked to prevent indexing of the tunnel endpoint.
-var botPatterns = []string{
-	"bot", "crawler", "spider", "crawling",
-	"googlebot", "bingbot", "yandex", "baidu", "duckduckbot",
-	"slurp", "ia_archiver", "archive.org",
-	"facebookexternalhit", "twitterbot", "linkedinbot",
-	"whatsapp", "telegrambot", "discordbot",
-	"semrush", "ahrefs", "mj12bot", "dotbot", "petalbot",
-	"bytespider", "gptbot", "chatgpt", "anthropic-ai",
-	"claudebot", "cohere-ai", "ccbot",
-	"curl", "wget", "python-requests", "httpie",
-	"go-http-client", "java", "libwww", "lwp-trivial",
-	"scrapy", "nutch", "httrack", "winhttp",
-	"headlesschrome", "phantomjs", "selenium",
-}
 
 // activeHTTPConns tracks active HTTP connections for limiting
 var activeHTTPConns int64
@@ -39,10 +21,9 @@ func StartHTTPServer(s *Server) {
 		handleHTTPRequest(s, w, r)
 	})
 
-	// Chain middleware: security headers -> connection limit -> bot blocking -> handler
 	srv := &http.Server{
 		Addr:           PublicPort,
-		Handler:        securityHeaders(connectionLimit(blockBots(handler))),
+		Handler:        securityHeaders(connectionLimit(handler)),
 		MaxHeaderBytes: 1 << 20, // 1MB max header size
 	}
 
@@ -71,30 +52,6 @@ func connectionLimit(next http.Handler) http.Handler {
 		if current > MaxHTTPConns {
 			http.Error(w, "Server too busy", http.StatusServiceUnavailable)
 			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-// blockBots is middleware that rejects requests from known bots and crawlers.
-// It checks the User-Agent header against a list of known bot patterns.
-func blockBots(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ua := strings.ToLower(r.UserAgent())
-
-		// Block empty User-Agent (often automated tools)
-		if ua == "" {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
-
-		// Check for bot patterns in User-Agent
-		for _, pattern := range botPatterns {
-			if strings.Contains(ua, pattern) {
-				http.Error(w, "Forbidden", http.StatusForbidden)
-				return
-			}
 		}
 
 		next.ServeHTTP(w, r)

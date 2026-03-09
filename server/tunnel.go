@@ -87,14 +87,6 @@ func handleTunnelConnection(s *Server, conn net.Conn) {
 		return
 	}
 
-	// Read client key (35 bytes: "ck-" + 32 hex chars)
-	clientKeyBuf := make([]byte, 35)
-	if _, err := io.ReadFull(conn, clientKeyBuf); err != nil {
-		log.Printf("Failed to read client key: %v", err)
-		conn.Close()
-		return
-	}
-
 	conn.SetReadDeadline(time.Time{}) // Clear deadline
 
 	// Validate token using constant-time comparison to prevent timing attacks
@@ -102,15 +94,6 @@ func handleTunnelConnection(s *Server, conn net.Conn) {
 	if subtle.ConstantTimeCompare(tokenBuf, expectedToken) != 1 {
 		log.Printf("Invalid token from %s", remoteAddr)
 		conn.Write([]byte("INVALID_TOKEN"))
-		conn.Close()
-		return
-	}
-
-	// Verify or bind client key (uses constant-time comparison internally)
-	clientKey := string(clientKeyBuf)
-	if !s.State.VerifyOrBindClientKey(clientKey) {
-		log.Printf("Invalid client key from %s", remoteAddr)
-		conn.Write([]byte("INVALID_CLIENT"))
 		conn.Close()
 		return
 	}

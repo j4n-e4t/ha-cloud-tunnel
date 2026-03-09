@@ -13,21 +13,17 @@ import (
 type Client struct {
 	serverAddr  string         // Remote server address (host:port)
 	token       string         // Authentication token
-	clientKey   string         // Client key for server binding
 	fingerprint string         // Expected server certificate fingerprint
 	targetAddr  string         // Local target address to proxy to
 	session     *yamux.Session // Active multiplexed session (nil if disconnected)
 	sessionMu   sync.RWMutex   // Protects session field
-	streamCount int64          // Counter for logging stream IDs
-	streamMu    sync.Mutex     // Protects streamCount
 }
 
 // NewClient creates a new tunnel client with the given configuration.
-func NewClient(serverAddr, token, clientKey, fingerprint, targetAddr string) *Client {
+func NewClient(serverAddr, token, fingerprint, targetAddr string) *Client {
 	return &Client{
 		serverAddr:  serverAddr,
 		token:       token,
-		clientKey:   clientKey,
 		fingerprint: fingerprint,
 		targetAddr:  targetAddr,
 	}
@@ -73,14 +69,6 @@ func (c *Client) SetSession(session *yamux.Session) {
 	c.session = session
 }
 
-// NextStreamID returns an incrementing stream ID for logging.
-func (c *Client) NextStreamID() int64 {
-	c.streamMu.Lock()
-	defer c.streamMu.Unlock()
-	c.streamCount++
-	return c.streamCount
-}
-
 // handleStreams accepts incoming streams from the server and spawns
 // goroutines to proxy them to the target.
 func (c *Client) handleStreams() {
@@ -96,7 +84,6 @@ func (c *Client) handleStreams() {
 			return
 		}
 
-		streamID := c.NextStreamID()
-		go proxyStream(stream, streamID, c.targetAddr)
+		go proxyStream(stream, c.targetAddr)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -31,21 +30,20 @@ const (
 
 // persistedState is the data saved to disk.
 type persistedState struct {
-	Token     string `json:"token"`
-	CertPEM   string `json:"cert_pem"`
-	KeyPEM    string `json:"key_pem"`
-	ClientKey string `json:"client_key,omitempty"` // Bound client key (set on first connection)
+	Token   string `json:"token"`
+	CertPEM string `json:"cert_pem"`
+	KeyPEM  string `json:"key_pem"`
 }
 
 // State holds server credentials and runtime connection state.
-// Token, certificate, and client key are persisted to disk.
+// Token and certificate are persisted to disk.
 type State struct {
-	token     string // Authentication token (sk-xxxx format)
-	certPEM   string // PEM-encoded server certificate
-	keyPEM    string // PEM-encoded private key
-	clientKey string // Bound client key (empty until first connection)
-	connected bool   // True if client is currently connected (memory-only)
-	mu        sync.RWMutex
+	token       string // Authentication token (sk-xxxx format)
+	certPEM     string // PEM-encoded server certificate
+	keyPEM      string // PEM-encoded private key
+	hasConnected bool  // True if a client has ever connected (memory-only)
+	connected   bool   // True if client is currently connected (memory-only)
+	mu          sync.RWMutex
 }
 
 var stateInstance *State
@@ -91,7 +89,6 @@ func (s *State) load() error {
 	s.token = p.Token
 	s.certPEM = p.CertPEM
 	s.keyPEM = p.KeyPEM
-	s.clientKey = p.ClientKey
 	s.mu.Unlock()
 
 	log.Println("Loaded credentials from disk")
@@ -102,10 +99,9 @@ func (s *State) load() error {
 func (s *State) save() error {
 	s.mu.RLock()
 	p := persistedState{
-		Token:     s.token,
-		CertPEM:   s.certPEM,
-		KeyPEM:    s.keyPEM,
-		ClientKey: s.clientKey,
+		Token:   s.token,
+		CertPEM: s.certPEM,
+		KeyPEM:  s.keyPEM,
 	}
 	s.mu.RUnlock()
 
@@ -128,28 +124,6 @@ func (s *State) GetToken() string {
 	return s.token
 }
 
-// VerifyOrBindClientKey checks the client key against the stored one.
-// On first connection (no stored key), binds to the provided key and saves.
-// Returns true if the key is valid, false if it doesn't match.
-// Uses constant-time comparison to prevent timing attacks.
-func (s *State) VerifyOrBindClientKey(key string) bool {
-	s.mu.Lock()
-
-	// First connection - bind to this client
-	if s.clientKey == "" {
-		s.clientKey = key
-		s.mu.Unlock()
-		log.Printf("Bound to client key: %s...", key[:8])
-		s.save()
-		return true
-	}
-
-	// Use constant-time comparison to prevent timing attacks
-	match := subtle.ConstantTimeCompare([]byte(s.clientKey), []byte(key)) == 1
-	s.mu.Unlock()
-	return match
-}
-
 // GetClientState returns the current client connection state.
 func (s *State) GetClientState() ClientState {
 	s.mu.RLock()
@@ -158,7 +132,7 @@ func (s *State) GetClientState() ClientState {
 	if s.connected {
 		return StateConnected
 	}
-	if s.clientKey != "" {
+	if s.hasConnected {
 		return StateDisconnected
 	}
 	return StateNull
@@ -169,6 +143,9 @@ func (s *State) SetClientState(newState ClientState) {
 	s.mu.Lock()
 	wasConnected := s.connected
 	s.connected = (newState == StateConnected)
+	if s.connected {
+		s.hasConnected = true
+	}
 	s.mu.Unlock()
 
 	if s.connected != wasConnected {

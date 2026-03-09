@@ -64,15 +64,11 @@ func main() {
 		targetAddr = DefaultTargetAddr
 	}
 
-	// Derive client key from machine identity
-	clientKey := DeriveClientKey()
-
-	c := NewClient(serverAddr, token, clientKey, fingerprint, targetAddr)
+	c := NewClient(serverAddr, token, fingerprint, targetAddr)
 
 	log.Printf("Server: %s", serverAddr)
 	log.Printf("Target: %s", targetAddr)
-	log.Printf("Client key: %s...", clientKey[:8])
-	log.Printf("Expected fingerprint: %s", fingerprint)
+	log.Printf("Fingerprint: %s", fingerprint)
 
 	c.Run()
 }

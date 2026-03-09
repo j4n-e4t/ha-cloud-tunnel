@@ -77,17 +77,12 @@ func (c *Client) dial(tlsConfig *tls.Config) (*tls.Conn, error) {
 	return conn, nil
 }
 
-// authenticate sends the token and client key to the server and waits for acknowledgment.
+// authenticate sends the token to the server and waits for acknowledgment.
 // Returns an error if authentication fails.
 func (c *Client) authenticate(conn net.Conn) error {
 	// Send authentication token
 	if _, err := conn.Write([]byte(c.token)); err != nil {
 		return fmt.Errorf("failed to send token: %w", err)
-	}
-
-	// Send client key
-	if _, err := conn.Write([]byte(c.clientKey)); err != nil {
-		return fmt.Errorf("failed to send client key: %w", err)
 	}
 
 	// Wait for server acknowledgment
