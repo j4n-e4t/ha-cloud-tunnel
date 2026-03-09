@@ -37,17 +37,6 @@ type persistedState struct {
 	ClientKey string `json:"client_key,omitempty"` // Bound client key (set on first connection)
 }
 
-// Stats holds runtime statistics for the tunnel (memory-only, not persisted).
-type Stats struct {
-	TotalRequests    int64     // Total HTTP requests proxied
-	ActiveConns      int64     // Currently active connections
-	BytesIn          int64     // Total bytes received from clients
-	BytesOut         int64     // Total bytes sent to clients
-	ConnectedAt      time.Time // When client connected (zero if disconnected)
-	LastRequestAt    time.Time // Time of last request
-	LastDisconnectAt time.Time // When client last disconnected
-}
-
 // State holds server credentials and runtime connection state.
 // Token, certificate, and client key are persisted to disk.
 type State struct {
@@ -56,7 +45,6 @@ type State struct {
 	keyPEM    string // PEM-encoded private key
 	clientKey string // Bound client key (empty until first connection)
 	connected bool   // True if client is currently connected (memory-only)
-	stats     Stats  // Runtime statistics (memory-only)
 	mu        sync.RWMutex
 }
 
@@ -181,53 +169,11 @@ func (s *State) SetClientState(newState ClientState) {
 	s.mu.Lock()
 	wasConnected := s.connected
 	s.connected = (newState == StateConnected)
-	if s.connected && !wasConnected {
-		s.stats.ConnectedAt = time.Now()
-	} else if !s.connected && wasConnected {
-		s.stats.LastDisconnectAt = time.Now()
-	}
 	s.mu.Unlock()
 
 	if s.connected != wasConnected {
 		log.Printf("State changed: client_state=%s", newState)
 	}
-}
-
-// GetStats returns a copy of the current statistics.
-func (s *State) GetStats() Stats {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.stats
-}
-
-// RecordRequest increments request count and updates last request time.
-func (s *State) RecordRequest() {
-	s.mu.Lock()
-	s.stats.TotalRequests++
-	s.stats.LastRequestAt = time.Now()
-	s.mu.Unlock()
-}
-
-// AddActiveConn increments active connection count.
-func (s *State) AddActiveConn() {
-	s.mu.Lock()
-	s.stats.ActiveConns++
-	s.mu.Unlock()
-}
-
-// RemoveActiveConn decrements active connection count.
-func (s *State) RemoveActiveConn() {
-	s.mu.Lock()
-	s.stats.ActiveConns--
-	s.mu.Unlock()
-}
-
-// AddBytes adds to the byte counters.
-func (s *State) AddBytes(in, out int64) {
-	s.mu.Lock()
-	s.stats.BytesIn += in
-	s.stats.BytesOut += out
-	s.mu.Unlock()
 }
 
 // GetTLSConfig builds a tls.Config from the stored certificate and returns
