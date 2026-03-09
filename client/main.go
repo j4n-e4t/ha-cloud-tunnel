@@ -64,8 +64,8 @@ func main() {
 		targetAddr = DefaultTargetAddr
 	}
 
-	// Derive client key from token + fingerprint
-	clientKey := DeriveClientKey(token, fingerprint)
+	// Derive client key from machine identity
+	clientKey := DeriveClientKey()
 
 	c := NewClient(serverAddr, token, clientKey, fingerprint, targetAddr)
 
