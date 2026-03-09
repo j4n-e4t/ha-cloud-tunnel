@@ -30,9 +30,10 @@ const (
 
 // persistedState is the data saved to disk.
 type persistedState struct {
-	Token   string `json:"token"`
-	CertPEM string `json:"cert_pem"`
-	KeyPEM  string `json:"key_pem"`
+	Token        string `json:"token"`
+	CertPEM      string `json:"cert_pem"`
+	KeyPEM       string `json:"key_pem"`
+	HasConnected bool   `json:"has_connected,omitempty"`
 }
 
 // State holds server credentials and runtime connection state.
@@ -89,6 +90,7 @@ func (s *State) load() error {
 	s.token = p.Token
 	s.certPEM = p.CertPEM
 	s.keyPEM = p.KeyPEM
+	s.hasConnected = p.HasConnected
 	s.mu.Unlock()
 
 	log.Println("Loaded credentials from disk")
@@ -99,9 +101,10 @@ func (s *State) load() error {
 func (s *State) save() error {
 	s.mu.RLock()
 	p := persistedState{
-		Token:   s.token,
-		CertPEM: s.certPEM,
-		KeyPEM:  s.keyPEM,
+		Token:        s.token,
+		CertPEM:      s.certPEM,
+		KeyPEM:       s.keyPEM,
+		HasConnected: s.hasConnected,
 	}
 	s.mu.RUnlock()
 
@@ -138,10 +141,11 @@ func (s *State) GetClientState() ClientState {
 	return StateNull
 }
 
-// SetClientState updates the client connection state (memory-only).
+// SetClientState updates the client connection state.
 func (s *State) SetClientState(newState ClientState) {
 	s.mu.Lock()
 	wasConnected := s.connected
+	wasEverConnected := s.hasConnected
 	s.connected = (newState == StateConnected)
 	if s.connected {
 		s.hasConnected = true
@@ -150,6 +154,11 @@ func (s *State) SetClientState(newState ClientState) {
 
 	if s.connected != wasConnected {
 		log.Printf("State changed: client_state=%s", newState)
+	}
+
+	// Persist hasConnected on first connection
+	if s.hasConnected && !wasEverConnected {
+		s.save()
 	}
 }
 
