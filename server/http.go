@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // botPatterns contains User-Agent substrings that identify bots and crawlers.
@@ -113,6 +114,11 @@ func handleHTTPRequest(s *Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Track stats
+	s.State.RecordRequest()
+	s.State.AddActiveConn()
+	defer s.State.RemoveActiveConn()
+
 	// Tunnel is connected - hijack connection and proxy through tunnel
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
@@ -151,24 +157,28 @@ func handleHTTPRequest(s *Server, w http.ResponseWriter, r *http.Request) {
 		stream.Write(buffered)
 	}
 
-	// Bidirectional copy between client and tunnel
+	// Bidirectional copy between client and tunnel with byte counting
 	var wg sync.WaitGroup
+	var bytesIn, bytesOut int64
 	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		io.Copy(stream, clientConn)
+		n, _ := io.Copy(stream, clientConn)
+		bytesIn = n
 		stream.Close()
 	}()
 
 	go func() {
 		defer wg.Done()
-		io.Copy(clientConn, stream)
+		n, _ := io.Copy(clientConn, stream)
+		bytesOut = n
 		clientConn.Close()
 	}()
 
 	wg.Wait()
-	log.Printf("Connection closed for %s", r.RemoteAddr)
+	s.State.AddBytes(bytesIn, bytesOut)
+	log.Printf("Connection closed for %s (in: %d, out: %d)", r.RemoteAddr, bytesIn, bytesOut)
 }
 
 // serveInfoPage renders the appropriate HTML page based on client state:
@@ -180,7 +190,7 @@ func serveInfoPage(s *Server, w http.ResponseWriter) {
 	if s.State.GetClientState() == StateNull {
 		renderSetupPage(w, s)
 	} else {
-		renderDisconnectedPage(w)
+		renderStatusPage(w, s)
 	}
 }
 
@@ -234,19 +244,104 @@ function copy(id) {
 		html.EscapeString(s.Fingerprint))
 }
 
-// renderDisconnectedPage renders the disconnected status page.
-func renderDisconnectedPage(w http.ResponseWriter) {
-	fmt.Fprint(w, `<!DOCTYPE html>
+// renderStatusPage renders the status page with connection info and stats.
+func renderStatusPage(w http.ResponseWriter, s *Server) {
+	stats := s.State.GetStats()
+	state := s.State.GetClientState()
+
+	statusText := "Disconnected"
+	statusClass := "disconnected"
+	timeInfo := ""
+
+	if state == StateConnected {
+		statusText = "Connected"
+		statusClass = "connected"
+		if !stats.ConnectedAt.IsZero() {
+			timeInfo = fmt.Sprintf("Connected for %s", formatDuration(time.Since(stats.ConnectedAt)))
+		}
+	} else {
+		if !stats.LastDisconnectAt.IsZero() {
+			timeInfo = fmt.Sprintf("Disconnected %s ago", formatDuration(time.Since(stats.LastDisconnectAt)))
+		}
+	}
+
+	lastRequest := "Never"
+	if !stats.LastRequestAt.IsZero() {
+		lastRequest = fmt.Sprintf("%s ago", formatDuration(time.Since(stats.LastRequestAt)))
+	}
+
+	fmt.Fprintf(w, `<!DOCTYPE html>
 <html>
 <head>
 <title>HA Cloud Tunnel</title>
 <meta http-equiv="refresh" content="5">
-<style>body{font-family:system-ui,sans-serif;max-width:600px;margin:40px auto;padding:20px;text-align:center}</style>
+<style>
+body{font-family:system-ui,sans-serif;max-width:600px;margin:40px auto;padding:20px;background:#f5f5f5}
+.card{background:white;border-radius:12px;padding:24px;margin-bottom:16px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
+h1{margin:0 0 8px 0;font-size:1.5rem}
+.status{display:inline-block;padding:4px 12px;border-radius:20px;font-weight:500;font-size:0.9rem}
+.connected{background:#d4edda;color:#155724}
+.disconnected{background:#f8d7da;color:#721c24}
+.time-info{color:#666;font-size:0.9rem;margin-top:8px}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+.stat{text-align:center}
+.stat-value{font-size:1.5rem;font-weight:bold;color:#333}
+.stat-label{font-size:0.8rem;color:#666;text-transform:uppercase}
+</style>
 </head>
 <body>
+<div class="card">
 <h1>HA Cloud Tunnel</h1>
-<p>Status: disconnected</p>
-<p>Waiting for client to reconnect...</p>
+<span class="status %s">%s</span>
+<div class="time-info">%s</div>
+</div>
+<div class="card">
+<div class="stats">
+<div class="stat"><div class="stat-value">%d</div><div class="stat-label">Total Requests</div></div>
+<div class="stat"><div class="stat-value">%d</div><div class="stat-label">Active Connections</div></div>
+<div class="stat"><div class="stat-value">%s</div><div class="stat-label">Data In</div></div>
+<div class="stat"><div class="stat-value">%s</div><div class="stat-label">Data Out</div></div>
+</div>
+</div>
+<div class="card">
+<div class="stats">
+<div class="stat"><div class="stat-value" style="font-size:1rem">%s</div><div class="stat-label">Last Request</div></div>
+</div>
+</div>
 </body>
-</html>`)
+</html>`,
+		statusClass, statusText, timeInfo,
+		stats.TotalRequests, stats.ActiveConns,
+		formatBytes(stats.BytesIn), formatBytes(stats.BytesOut),
+		lastRequest)
+}
+
+// formatDuration formats a duration in a human-readable way.
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
+	}
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	return fmt.Sprintf("%dd %dh", days, hours)
+}
+
+// formatBytes formats bytes in a human-readable way.
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }

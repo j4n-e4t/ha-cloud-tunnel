@@ -36,7 +36,7 @@ const (
 // - FINGERPRINT: Server certificate fingerprint (SHA256:xxxx)
 // Optional:
 // - TARGET_ADDR: Local target address (default: homeassistant:8123)
-// Client key is auto-generated and stored in /data/state.json
+// Client key is derived from token + fingerprint (not stored).
 func main() {
 	serverAddr := os.Getenv("SERVER_ADDR")
 	if serverAddr == "" {
@@ -64,9 +64,8 @@ func main() {
 		targetAddr = DefaultTargetAddr
 	}
 
-	// Load or generate client key
-	state := GetClientState()
-	clientKey := state.GetClientKey()
+	// Derive client key from token + fingerprint
+	clientKey := DeriveClientKey(token, fingerprint)
 
 	c := NewClient(serverAddr, token, clientKey, fingerprint, targetAddr)
 
